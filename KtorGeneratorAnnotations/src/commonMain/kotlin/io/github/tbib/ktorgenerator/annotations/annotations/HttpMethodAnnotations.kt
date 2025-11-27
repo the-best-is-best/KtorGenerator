@@ -39,3 +39,7 @@ annotation class Multipart
 @Target(VALUE_PARAMETER)
 @Retention(RUNTIME)
 annotation class Part(val value: String = "")
+
+@Target(FUNCTION)
+@Retention(RUNTIME)
+annotation class Headers(vararg val value: String)

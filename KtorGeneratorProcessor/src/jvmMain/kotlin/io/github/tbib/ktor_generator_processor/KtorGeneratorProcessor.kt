@@ -72,7 +72,7 @@ class KtorGeneratorProcessor(
     private fun validateFunction(func: KSFunctionDeclaration) {
         val funcName = func.simpleName.asString()
         val httpAnnotation =
-            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
+            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName!!.asString() in httpAnnotations.keys }
         val httpMethod =
             httpAnnotations[httpAnnotation.annotationType.resolve().declaration.qualifiedName!!.asString()]!!
         val path = httpAnnotation.arguments.first().value as String
@@ -107,6 +107,16 @@ class KtorGeneratorProcessor(
         val hasBody = bodyParams.isNotEmpty()
         if (hasBody && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
             throw IllegalStateException("@Body can only be used with POST, PUT, or PATCH methods in function '$funcName'.")
+        }
+
+        // @Headers validation
+        func.annotations.find { it.shortName.asString() == "Headers" }?.let {
+            val headers = it.arguments.first().value as? List<String>
+            headers?.forEach { header ->
+                if (":" !in header) {
+                    throw IllegalStateException("Malformed @Headers value: \"$header\". Header must be in the format \"Name: Value\". In function '$funcName'.")
+                }
+            }
         }
 
         // Multipart validation
@@ -195,6 +205,14 @@ class KtorGeneratorProcessor(
         } else {
             writer.write("        val response = client.request(urlPath) {\n")
             writer.write("            method = HttpMethod.$httpMethod\n")
+
+            func.annotations.find { it.shortName.asString() == "Headers" }?.let { headersAnn ->
+                (headersAnn.arguments.first().value as? List<String>)?.forEach { headerValue ->
+                    val (key, value) = headerValue.split(":", limit = 2).map { it.trim() }
+                    writer.write("            header(\"$key\", \"$value\")\n")
+                }
+            }
+
             func.parameters.forEach { param ->
                 param.annotations.find { it.shortName.asString() == "Query" }
                     ?.let { queryAnnotation ->
