@@ -15,12 +15,14 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.io.IOException
 import kotlinx.serialization.json.Json
 
-internal abstract class KtorApi {
+internal object KtorApi {
 
 
     init {
         KtorGeneratorClient.initKtorClient(createClient())
     }
+
+    val ktorApiServices = KtorGeneratorClient.createKtorApiServices()
 
     private fun createClient(): HttpClient {
         return HttpClient {

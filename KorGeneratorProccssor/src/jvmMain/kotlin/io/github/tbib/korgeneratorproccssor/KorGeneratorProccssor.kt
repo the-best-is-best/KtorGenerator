@@ -63,10 +63,11 @@ class KorGeneratorProcessor(
             writer.write("import io.ktor.client.request.*\n")
             writer.write("import io.github.tbib.ktorgenerator.annotations.engine.KtorGeneratorClient\n")
             writer.write("import io.ktor.http.*\n")
-            writer.write("import io.ktor.client.call.body\n")
-//            writer.write("import io.github.tbib.ktorgenerator.annotations.annotations.*\n")
+            writer.write("import io.ktor.client.call.body\n\n")
 
-            writer.write("class $implName : $interfaceName {\n\n")
+            writer.write("fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
+
+            writer.write("internal class $implName : $interfaceName {\n\n")
 
             for (func in functions) {
                 generateFunctionImpl(func, writer)
