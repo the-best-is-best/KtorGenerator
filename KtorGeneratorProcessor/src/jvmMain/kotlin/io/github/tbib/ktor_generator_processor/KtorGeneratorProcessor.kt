@@ -62,7 +62,7 @@ class KtorGeneratorProcessor(
             writer.write("import io.github.tbib.ktorgenerator.annotations.engine.KtorGeneratorClient\n")
             writer.write("import io.ktor.http.content.PartData\n")
 
-            writer.write("fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
+            writer.write("internal fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
             writer.write("internal class $implName : $interfaceName {\n")
             functions.forEach { generateFunctionImpl(it, writer, resolver) }
             writer.write("}\n")
@@ -71,23 +71,63 @@ class KtorGeneratorProcessor(
 
     private fun validateFunction(func: KSFunctionDeclaration) {
         val funcName = func.simpleName.asString()
-        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
-        if (!isMultipart) return
+        val httpAnnotation =
+            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
+        val httpMethod =
+            httpAnnotations[httpAnnotation.annotationType.resolve().declaration.qualifiedName!!.asString()]!!
+        val path = httpAnnotation.arguments.first().value as String
 
-        val partParams =
-            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Part" } }
+        // @Path validation
+        val pathParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Path" } }
+        val urlPlaceholders = Regex("\\{(\\w+)\\}").findAll(path).map { it.groupValues[1] }.toSet()
+        val pathAnnotationValues = pathParams.map {
+            (it.annotations.first { an -> an.shortName.asString() == "Path" }.arguments.firstOrNull()?.value as? String
+                ?: "").ifEmpty { it.name!!.asString() }
+        }.toSet()
+
+        val missingInParams = urlPlaceholders - pathAnnotationValues
+        if (missingInParams.isNotEmpty()) {
+            throw IllegalStateException("Missing @Path for placeholders: $missingInParams in function '$funcName'.")
+        }
+        val missingInUrl = pathAnnotationValues - urlPlaceholders
+        if (missingInUrl.isNotEmpty()) {
+            throw IllegalStateException("Unused @Path parameters: $missingInUrl in function '$funcName'.")
+        }
+
+        // General body validation
         val bodyParams =
             func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Body" } }
 
-        if (partParams.isNotEmpty() && bodyParams.isNotEmpty()) {
-            throw IllegalStateException("Cannot use @Part and @Body in the same multipart function: '$funcName'.")
+        if (bodyParams.size > 1) {
+            throw IllegalStateException("Multiple @Body parameters are not allowed in function '$funcName'.")
         }
-        if (partParams.isEmpty() && bodyParams.isEmpty()) {
-            throw IllegalStateException("A @Multipart function must have at least one @Part parameter or a @Body parameter of type MultiPartFormDataContent: '$funcName'.")
+
+
+        val hasBody = bodyParams.isNotEmpty()
+        if (hasBody && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
+            throw IllegalStateException("@Body can only be used with POST, PUT, or PATCH methods in function '$funcName'.")
         }
-        bodyParams.firstOrNull()?.let {
-            if (it.type.resolve().declaration.qualifiedName?.asString() != "io.ktor.client.request.forms.MultiPartFormDataContent") {
-                throw IllegalStateException("In a @Multipart function, a @Body parameter must be of type MultiPartFormDataContent: '$funcName'.")
+
+        // Multipart validation
+        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
+        if (isMultipart) {
+            if (httpMethod.lowercase() !in listOf("post", "put", "patch")) {
+                throw IllegalStateException("@Multipart is only supported for POST, PUT, and PATCH requests in function '$funcName'.")
+            }
+
+            val partParams =
+                func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Part" } }
+            if (partParams.isNotEmpty() && bodyParams.isNotEmpty()) {
+                throw IllegalStateException("Cannot use @Part and @Body in the same multipart function: '$funcName'.")
+            }
+            if (partParams.isEmpty() && bodyParams.isEmpty()) {
+                throw IllegalStateException("A @Multipart function must have at least one @Part parameter or a @Body parameter of type MultiPartFormDataContent: '$funcName'.")
+            }
+            bodyParams.firstOrNull()?.let {
+                if (it.type.resolve().declaration.qualifiedName?.asString() != "io.ktor.client.request.forms.MultiPartFormDataContent") {
+                    throw IllegalStateException("In a @Multipart function, a @Body parameter must be of type MultiPartFormDataContent: '$funcName'.")
+                }
             }
         }
     }
@@ -142,17 +182,11 @@ class KtorGeneratorProcessor(
                             val isNullable = paramType.isMarkedNullable
 
                             val partCreationCode = when {
-                                isList -> "        multipartData.addAll(${param.name!!.asString()})\n"
-                                isPartData -> "        multipartData.add(${param.name!!.asString()})\n"
-                                else -> "        multipartData.add(PartData.FormItem(${param.name!!.asString()}.toString(), { }, Headers.build { append(HttpHeaders.ContentDisposition, \"form-data; name=$partName\") }))\n"
+                                isList -> "        ${param.name!!.asString()}?.let { multipartData.addAll(it) }\n"
+                                isPartData -> "        ${param.name!!.asString()}?.let { multipartData.add(it) }\n"
+                                else -> "        ${param.name!!.asString()}?.let { multipartData.add(PartData.FormItem(it.toString(), { }, Headers.build { append(HttpHeaders.ContentDisposition, \"form-data; name=$partName\") })) }\n"
                             }
-                            if (isNullable) {
-                                writer.write("        if(${param.name!!.asString()} != null) {\n")
-                                writer.write(partCreationCode)
-                                writer.write("        }\n")
-                            } else {
-                                writer.write(partCreationCode)
-                            }
+                            writer.write(partCreationCode)
                         }
                 }
                 writer.write("        val response = client.submitFormWithBinaryData(url = urlPath, formData = multipartData)\n")
@@ -186,6 +220,10 @@ class KtorGeneratorProcessor(
                     writer.write("            contentType(ContentType.Application.Json)\n")
                     writer.write("            setBody(${param.name!!.asString()})\n")
                 }
+                param.annotations.find { it.shortName.asString() == "FieldMap" }?.let {
+                    writer.write("            contentType(ContentType.Application.Json)\n")
+                    writer.write("            setBody(${param.name!!.asString()})\n")
+                }
             }
             writer.write("        }\n")
             if (!returnsUnit) writer.write("        return response.body()\n")
@@ -214,7 +252,7 @@ private fun KSType.toTypeNameString(resolver: Resolver): String {
     val base = declaration.qualifiedName!!.asString()
     val args = if (arguments.isNotEmpty()) "<${
         arguments.joinToString(", ") {
-            it.type!!.resolve().toTypeNameString(resolver)
+            it.type?.resolve()?.toTypeNameString(resolver) ?: "*"
         }
     }>" else ""
     val nullability = if (isMarkedNullable) "?" else ""

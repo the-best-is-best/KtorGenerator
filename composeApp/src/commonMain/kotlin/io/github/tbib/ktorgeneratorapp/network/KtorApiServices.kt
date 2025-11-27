@@ -1,6 +1,7 @@
 package io.github.tbib.ktorgeneratorapp.network
 
 import io.github.tbib.ktorgenerator.annotations.annotations.ApiService
+import io.github.tbib.ktorgenerator.annotations.annotations.Body
 import io.github.tbib.ktorgenerator.annotations.annotations.GET
 import io.github.tbib.ktorgenerator.annotations.annotations.Multipart
 import io.github.tbib.ktorgenerator.annotations.annotations.POST
@@ -20,6 +21,8 @@ interface KtorApiServices {
 
     @Multipart
     @POST("/post")
-    suspend fun uploadPhoto(@Part name: String?, @Part email: String?, @Part file: List<PartData>)
+    suspend fun uploadPhoto(@Part name: String?, @Part email: String, @Part file: List<PartData>?)
 
+    @POST("your/endpoint")
+    suspend fun sendSomeData(@Body data: Map<String, String>)
 }
