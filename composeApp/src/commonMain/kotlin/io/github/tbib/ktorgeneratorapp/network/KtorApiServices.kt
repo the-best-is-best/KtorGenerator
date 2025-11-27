@@ -19,7 +19,7 @@ interface KtorApiServices {
     suspend fun getPostById(@Path("id") id: Int): PostsResponse
 
     @Multipart
-    @POST("UploadPhoto")
-    suspend fun uploadPhoto(@Part data: PartData.FileItem)
+    @POST("/post")
+    suspend fun uploadPhoto(@Part name: String, @Part file: List<PartData>)
 
 }

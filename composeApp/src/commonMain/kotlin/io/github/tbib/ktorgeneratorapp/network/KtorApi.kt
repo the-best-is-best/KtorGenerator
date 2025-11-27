@@ -9,7 +9,6 @@ import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.plugins.timeout
-import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.io.IOException
@@ -19,7 +18,7 @@ internal object KtorApi {
 
 
     init {
-        KtorGeneratorClient.initKtorClient(createClient())
+        KtorGeneratorClient.initKtorClient(createClient(), "https://httpbin.org")
     }
 
     val ktorApiServices = KtorGeneratorClient.createKtorApiServices()
@@ -68,13 +67,8 @@ internal object KtorApi {
 
     // ✅ Reset Client
     fun resetClient() {
-        KtorGeneratorClient.initKtorClient(createClient())
+        KtorGeneratorClient.initKtorClient(createClient(), "")
     }
 
-    open fun HttpRequestBuilder.pathUrl(path: String) {
-        url {
-//            takeFrom(BuildKonfig.DOMAIN)
-//                .path(BuildKonfig.API_PATH, path)
-        }
-    }
+
 }
