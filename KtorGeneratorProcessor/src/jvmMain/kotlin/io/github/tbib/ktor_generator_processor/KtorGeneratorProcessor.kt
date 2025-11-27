@@ -9,15 +9,15 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSFunctionDeclaration
 
-class KorGeneratorProcessor(
+class KtorGeneratorProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger
 ) : SymbolProcessor {
 
     private val httpAnnotations = mapOf(
         "io.github.tbib.ktorgenerator.annotations.annotations.GET" to "Get",
-        "io.github.tbib.ktorgenerator.annotations.annotations.POST" to "POST",
-        "io.github.tbib.ktorgenerator.annotations.annotations.PUT" to "PUT",
+        "io.github.tbib.ktorgenerator.annotations.annotations.POST" to "Post",
+        "io.github.tbib.ktorgenerator.annotations.annotations.PUT" to "Put",
         "io.github.tbib.ktorgenerator.annotations.annotations.DELETE" to "Delete",
         "io.github.tbib.ktorgenerator.annotations.annotations.PATCH" to "Patch",
         "io.github.tbib.ktorgenerator.annotations.annotations.OPTIONS" to "Options",
@@ -61,6 +61,7 @@ class KorGeneratorProcessor(
         file.writer().use { writer ->
             writer.write("package $pkg\n\n")
             writer.write("import io.ktor.client.request.*\n")
+            writer.write("import io.ktor.client.request.forms.*\n")
             writer.write("import io.github.tbib.ktorgenerator.annotations.engine.KtorGeneratorClient\n")
             writer.write("import io.ktor.http.*\n")
             writer.write("import io.ktor.client.call.body\n\n")
@@ -116,8 +117,30 @@ class KorGeneratorProcessor(
             throw RuntimeException("Multiple @Body parameters found in function '$funcName'.")
         }
 
-        if (bodyParams.isNotEmpty() && httpMethod !in listOf("POST", "PUT", "PATCH")) {
+        if (bodyParams.isNotEmpty() && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
             throw RuntimeException("@Body is not supported for $httpMethod requests in function '$funcName'.")
+        }
+
+        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
+        if (isMultipart && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
+            throw RuntimeException("@Multipart is only supported for POST, PUT, and PATCH requests in function '$funcName'.")
+        }
+
+        val partParams =
+            func.parameters.filter { p -> p.annotations.any { it.shortName.asString() == "Part" } }
+
+        if (isMultipart) {
+            if (partParams.isNotEmpty() && bodyParams.isNotEmpty()) {
+                throw RuntimeException("Cannot use @Part and @Body in the same function. In function '$funcName'.")
+            }
+            if (partParams.isEmpty() && bodyParams.isEmpty()) {
+                throw RuntimeException("Multipart request must have at least one @Part or @Body parameter. In function '$funcName'.")
+            }
+            bodyParams.firstOrNull()?.let {
+                if (it.type.resolve().declaration.qualifiedName?.asString() != "io.ktor.client.request.forms.MultiPartFormDataContent") {
+                    throw RuntimeException("@Body parameter in a multipart request must be of type MultiPartFormDataContent. In function '$funcName'.")
+                }
+            }
         }
     }
 
@@ -170,37 +193,67 @@ class KorGeneratorProcessor(
         }
         writer.write("        val urlPath = \"$pathTemplate\"\n")
 
-        val requestBlock = buildString {
-            append("client.request(urlPath) {\n")
-            append("            method = HttpMethod.$httpMethod\n")
+        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
 
-            func.parameters.forEach { param ->
-                param.annotations.find { it.shortName.asString() == "Query" }
-                    ?.let { queryAnnotation ->
-                        val queryParamName =
-                            (queryAnnotation.arguments.firstOrNull()?.value as? String
+        if (isMultipart) {
+            val bodyParam =
+                func.parameters.firstOrNull { p -> p.annotations.any { it.shortName.asString() == "Body" } }
+            if (bodyParam != null) {
+                writer.write("        val response = client.request(urlPath) {\n")
+                writer.write("              method = HttpMethod.$httpMethod\n")
+                writer.write("              setBody(${bodyParam.name!!.asString()})\n")
+                writer.write("        }\n")
+            } else {
+                writer.write("        val response = client.submitFormWithBinaryData(\n")
+                writer.write("            url = urlPath,\n")
+                writer.write("            formData = formData {\n")
+                func.parameters.forEach { param ->
+                    param.annotations.find { it.shortName.asString() == "Part" }
+                        ?.let { partAnnotation ->
+                            val partName = (partAnnotation.arguments.firstOrNull()?.value as? String
                                 ?: "").ifEmpty { param.name!!.asString() }
-                        append("            parameter(\"$queryParamName\", ${param.name!!.asString()})\n")
-                    }
-
-                param.annotations.find { it.shortName.asString() == "Header" }
-                    ?.let { headerAnnotation ->
-                        val headerName = headerAnnotation.arguments.first().value as String
-                        append("            header(\"$headerName\", ${param.name!!.asString()})\n")
-                    }
-
-                if (param.annotations.any { it.shortName.asString() == "Body" }) {
-                    append("            contentType(ContentType.Application.Json)\n")
-                    append("            setBody(${param.name!!.asString()})\n")
+                            writer.write("                append(\"$partName\", ${param.name!!.asString()})\n")
+                        }
                 }
+                writer.write("            }\n")
+                writer.write("        )\n")
             }
-            append("        }")
-        }
-
-        if (returnsUnit) {
-            writer.write("        $requestBlock\n")
+            if (!returnsUnit) {
+                writer.write("        return response.body()\n")
+            }
         } else {
-            writer.write("        return $requestBlock.body<$returnTypeString>()\n")
+            val requestBlock = buildString {
+                append("client.request(urlPath) {\n")
+                append("            method = HttpMethod.$httpMethod\n")
+
+                func.parameters.forEach { param ->
+                    param.annotations.find { it.shortName.asString() == "Query" }
+                        ?.let { queryAnnotation ->
+                            val queryParamName =
+                                (queryAnnotation.arguments.firstOrNull()?.value as? String
+                                    ?: "").ifEmpty { param.name!!.asString() }
+                            append("            parameter(\"$queryParamName\", ${param.name!!.asString()})\n")
+                        }
+
+                    param.annotations.find { it.shortName.asString() == "Header" }
+                        ?.let { headerAnnotation ->
+                            val headerName = headerAnnotation.arguments.first().value as String
+                            append("            header(\"$headerName\", ${param.name!!.asString()})\n")
+                        }
+
+                    if (param.annotations.any { it.shortName.asString() == "Body" }) {
+                        append("            contentType(ContentType.Application.Json)\n")
+                        append("            setBody(${param.name!!.asString()})\n")
+                    }
+                }
+                append("        }")
+            }
+
+            if (returnsUnit) {
+                writer.write("        $requestBlock\n")
+            } else {
+                writer.write("        return $requestBlock.body<$returnTypeString>()\n")
+            }
         }
         writer.write("    }\n\n")
     }

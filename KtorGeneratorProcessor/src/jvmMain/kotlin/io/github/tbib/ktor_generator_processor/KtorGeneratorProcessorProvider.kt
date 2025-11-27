@@ -6,5 +6,5 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
 
 class KtorGeneratorProcessorProvider : SymbolProcessorProvider {
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        KorGeneratorProcessor(environment.codeGenerator, environment.logger)
+        KtorGeneratorProcessor(environment.codeGenerator, environment.logger)
 }
