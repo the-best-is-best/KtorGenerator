@@ -20,6 +20,6 @@ interface KtorApiServices {
 
     @Multipart
     @POST("/post")
-    suspend fun uploadPhoto(@Part name: String, @Part file: List<PartData>)
+    suspend fun uploadPhoto(@Part name: String?, @Part email: String?, @Part file: List<PartData>)
 
 }

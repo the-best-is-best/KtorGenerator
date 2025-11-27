@@ -138,14 +138,20 @@ class KtorGeneratorProcessor(
                                 paramType.declaration.qualifiedName?.asString() == "kotlin.collections.List"
                             val isPartData =
                                 (paramType.declaration as? KSClassDeclaration)?.getAllSuperTypes()
-                                    ?.any { it.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData" } == true
+                                    ?.any { it.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData" } == true || paramType.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData"
+                            val isNullable = paramType.isMarkedNullable
 
-                            if (isList) {
-                                writer.write("        multipartData.addAll(${param.name!!.asString()})\n")
-                            } else if (isPartData) {
-                                writer.write("        multipartData.add(${param.name!!.asString()})\n")
+                            val partCreationCode = when {
+                                isList -> "        multipartData.addAll(${param.name!!.asString()})\n"
+                                isPartData -> "        multipartData.add(${param.name!!.asString()})\n"
+                                else -> "        multipartData.add(PartData.FormItem(${param.name!!.asString()}.toString(), { }, Headers.build { append(HttpHeaders.ContentDisposition, \"form-data; name=$partName\") }))\n"
+                            }
+                            if (isNullable) {
+                                writer.write("        if(${param.name!!.asString()} != null) {\n")
+                                writer.write(partCreationCode)
+                                writer.write("        }\n")
                             } else {
-                                writer.write("        multipartData.add(PartData.FormItem(${param.name!!.asString()}.toString(), { }, Headers.build { append(HttpHeaders.ContentDisposition, \"form-data; name=$partName\") }))\n")
+                                writer.write(partCreationCode)
                             }
                         }
                 }
@@ -161,12 +167,20 @@ class KtorGeneratorProcessor(
                         val queryParamName =
                             (queryAnnotation.arguments.firstOrNull()?.value as? String
                                 ?: "").ifEmpty { param.name!!.asString() }
+                        if (param.type.resolve().isMarkedNullable) {
+                            writer.write("            ${param.name!!.asString()}?.let { parameter(\"$queryParamName\", it) }\n")
+                        } else {
                         writer.write("            parameter(\"$queryParamName\", ${param.name!!.asString()})\n")
+                    }
                     }
                 param.annotations.find { it.shortName.asString() == "Header" }
                     ?.let { headerAnnotation ->
                         val headerName = headerAnnotation.arguments.first().value as String
+                        if (param.type.resolve().isMarkedNullable) {
+                            writer.write("            ${param.name!!.asString()}?.let { header(\"$headerName\", it) }\n")
+                        } else {
                         writer.write("            header(\"$headerName\", ${param.name!!.asString()})\n")
+                    }
                     }
                 param.annotations.find { it.shortName.asString() == "Body" }?.let {
                     writer.write("            contentType(ContentType.Application.Json)\n")
@@ -188,17 +202,23 @@ private fun KSFunctionDeclaration.toSignatureString(resolver: Resolver): String 
             it.type.resolve().toTypeNameString(resolver)
         }"
     }
-    val returnType = returnType!!.resolve().toTypeNameString(resolver)
-    return if (returnType == "kotlin.Unit") "$name($params)" else "$name($params): $returnType"
+    val returnType = returnType!!.resolve()
+    val returnTypeString =
+        if (returnType.declaration.qualifiedName?.asString() == "kotlin.Unit") "" else ": ${
+            returnType.toTypeNameString(resolver)
+        }"
+    return "$name($params)$returnTypeString"
 }
 
 private fun KSType.toTypeNameString(resolver: Resolver): String {
     val base = declaration.qualifiedName!!.asString()
-    return if (arguments.isEmpty()) base else "$base<${
+    val args = if (arguments.isNotEmpty()) "<${
         arguments.joinToString(", ") {
             it.type!!.resolve().toTypeNameString(resolver)
         }
-    }>"
+    }>" else ""
+    val nullability = if (isMarkedNullable) "?" else ""
+    return "$base$args$nullability"
 }
 
 private fun KSClassDeclaration.getAllSuperTypes(): Sequence<KSType> =
