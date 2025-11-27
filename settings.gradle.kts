@@ -30,4 +30,4 @@ dependencyResolutionManagement {
 
 include(":composeApp")
 include(":KtorGeneratorAnnotations")
-include(":KorGeneratorProccssor")
+include(":KtorGeneratorProcessor")

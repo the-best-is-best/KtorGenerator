@@ -105,7 +105,7 @@ android {
 dependencies {
     debugImplementation(compose.uiTooling)
 
-    ksp(projects.korGeneratorProccssor)
+    ksp(projects.ktorGeneratorProcessor)
     ksp(libs.automapper.processor)
 }
 
@@ -116,10 +116,10 @@ ksp {
 
 
 dependencies {
-    add("kspCommonMainMetadata", projects.korGeneratorProccssor)
-    add("kspAndroid", projects.korGeneratorProccssor)
-    add("kspIosArm64", projects.korGeneratorProccssor)
-    add("kspIosSimulatorArm64", projects.korGeneratorProccssor)
+    add("kspCommonMainMetadata", projects.ktorGeneratorProcessor)
+    add("kspAndroid", projects.ktorGeneratorProcessor)
+    add("kspIosArm64", projects.ktorGeneratorProcessor)
+    add("kspIosSimulatorArm64", projects.ktorGeneratorProcessor)
 
     debugImplementation(compose.uiTooling)
 }

@@ -1,4 +1,4 @@
-package io.github.tbib.korgeneratorproccssor
+package io.github.tbib.ktor_generator_processor
 
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
