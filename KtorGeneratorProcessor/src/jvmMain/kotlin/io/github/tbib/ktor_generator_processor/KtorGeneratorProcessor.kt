@@ -59,12 +59,14 @@ class KtorGeneratorProcessor(
         )
 
         file.writer().use { writer ->
-            writer.write("package $pkg\n\n")
+            writer.write("@file:OptIn(InternalAPI::class)\n\npackage $pkg\n\n")
+            writer.write("import io.ktor.utils.io.InternalAPI\n")
             writer.write("import io.ktor.client.request.*\n")
             writer.write("import io.ktor.client.request.forms.*\n")
             writer.write("import io.github.tbib.ktorgenerator.annotations.engine.KtorGeneratorClient\n")
             writer.write("import io.ktor.http.*\n")
-            writer.write("import io.ktor.client.call.body\n\n")
+            writer.write("import io.ktor.client.call.body\n")
+            writer.write("import io.ktor.utils.io.ByteReadChannel\n\n")
 
             writer.write("fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
 
@@ -73,8 +75,7 @@ class KtorGeneratorProcessor(
             for (func in functions) {
                 generateFunctionImpl(func, writer)
             }
-
-            writer.write("}\n")
+            writer.write("\n}")
         }
     }
 
@@ -117,29 +118,32 @@ class KtorGeneratorProcessor(
             throw RuntimeException("Multiple @Body parameters found in function '$funcName'.")
         }
 
-        if (bodyParams.isNotEmpty() && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
-            throw RuntimeException("@Body is not supported for $httpMethod requests in function '$funcName'.")
-        }
-
         val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
-        if (isMultipart && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
-            throw RuntimeException("@Multipart is only supported for POST, PUT, and PATCH requests in function '$funcName'.")
-        }
-
-        val partParams =
-            func.parameters.filter { p -> p.annotations.any { it.shortName.asString() == "Part" } }
-
         if (isMultipart) {
+            if (httpMethod.lowercase() !in listOf("post", "put", "patch")) {
+                throw RuntimeException("@Multipart is only supported for POST, PUT, and PATCH requests in function '$funcName'.")
+            }
+            val partParams =
+                func.parameters.filter { p -> p.annotations.any { it.shortName.asString() == "Part" } }
             if (partParams.isNotEmpty() && bodyParams.isNotEmpty()) {
-                throw RuntimeException("Cannot use @Part and @Body in the same function. In function '$funcName'.")
+                throw RuntimeException("Cannot use @Part and @Body in the same multipart function. In function '$funcName'.")
             }
             if (partParams.isEmpty() && bodyParams.isEmpty()) {
-                throw RuntimeException("Multipart request must have at least one @Part or @Body parameter. In function '$funcName'.")
+                throw RuntimeException("A @Multipart function must have at least one @Part parameter or a @Body parameter of type MultiPartFormDataContent. In function '$funcName'.")
             }
             bodyParams.firstOrNull()?.let {
                 if (it.type.resolve().declaration.qualifiedName?.asString() != "io.ktor.client.request.forms.MultiPartFormDataContent") {
-                    throw RuntimeException("@Body parameter in a multipart request must be of type MultiPartFormDataContent. In function '$funcName'.")
+                    throw RuntimeException("In a @Multipart function, the @Body parameter must be of type MultiPartFormDataContent. In function '$funcName'.")
                 }
+            }
+        } else {
+            if (bodyParams.isNotEmpty() && httpMethod.lowercase() !in listOf(
+                    "post",
+                    "put",
+                    "patch"
+                )
+            ) {
+                throw RuntimeException("@Body is not supported for $httpMethod requests in function '$funcName'.")
             }
         }
     }
@@ -212,7 +216,13 @@ class KtorGeneratorProcessor(
                         ?.let { partAnnotation ->
                             val partName = (partAnnotation.arguments.firstOrNull()?.value as? String
                                 ?: "").ifEmpty { param.name!!.asString() }
-                            writer.write("                append(\"$partName\", ${param.name!!.asString()})\n")
+
+                            val paramType = param.type.resolve()
+                            if (paramType.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData") {
+                                writer.write("                append(${param.name!!.asString()})\n")
+                            } else {
+                                writer.write("                append(\"$partName\", ${param.name!!.asString()})\n")
+                            }
                         }
                 }
                 writer.write("            }\n")
@@ -255,6 +265,6 @@ class KtorGeneratorProcessor(
                 writer.write("        return $requestBlock.body<$returnTypeString>()\n")
             }
         }
-        writer.write("    }\n\n")
+        writer.write("    }\n")
     }
 }

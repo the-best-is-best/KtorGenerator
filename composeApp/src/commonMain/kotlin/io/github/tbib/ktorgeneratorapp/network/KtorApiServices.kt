@@ -1,13 +1,13 @@
 package io.github.tbib.ktorgeneratorapp.network
 
 import io.github.tbib.ktorgenerator.annotations.annotations.ApiService
-import io.github.tbib.ktorgenerator.annotations.annotations.Body
 import io.github.tbib.ktorgenerator.annotations.annotations.GET
 import io.github.tbib.ktorgenerator.annotations.annotations.Multipart
 import io.github.tbib.ktorgenerator.annotations.annotations.POST
+import io.github.tbib.ktorgenerator.annotations.annotations.Part
 import io.github.tbib.ktorgenerator.annotations.annotations.Path
 import io.github.tbib.ktorgeneratorapp.responses.PostsResponse
-import io.ktor.client.request.forms.MultiPartFormDataContent
+import io.ktor.http.content.PartData
 
 @ApiService
 interface KtorApiServices {
@@ -20,6 +20,6 @@ interface KtorApiServices {
 
     @Multipart
     @POST("UploadPhoto")
-    suspend fun uploadPhoto(@Body data: MultiPartFormDataContent)
+    suspend fun uploadPhoto(@Part data: PartData.FileItem)
 
 }

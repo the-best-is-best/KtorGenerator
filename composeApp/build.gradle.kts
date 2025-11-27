@@ -59,6 +59,7 @@ kotlin {
 
             implementation(libs.automapperannotations)
 
+            implementation("io.github.vinceglb:filekit-core:0.12.0")
 
         }
         commonTest.dependencies {
