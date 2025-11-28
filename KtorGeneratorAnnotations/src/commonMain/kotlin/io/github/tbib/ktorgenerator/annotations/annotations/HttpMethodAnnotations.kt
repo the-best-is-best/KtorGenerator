@@ -43,3 +43,15 @@ annotation class Part(val value: String = "")
 @Target(FUNCTION)
 @Retention(RUNTIME)
 annotation class Headers(vararg val value: String)
+
+@Target(FUNCTION)
+@Retention(RUNTIME)
+annotation class FormUrlEncoded
+
+@Target(VALUE_PARAMETER)
+@Retention(RUNTIME)
+annotation class Field(val value: String)
+
+@Target(VALUE_PARAMETER)
+@Retention(RUNTIME)
+annotation class FieldMap

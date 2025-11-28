@@ -8,6 +8,7 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSFunctionDeclaration
 import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.Modifier
 
 class KtorGeneratorProcessor(
     private val codeGenerator: CodeGenerator,
@@ -62,8 +63,10 @@ class KtorGeneratorProcessor(
             writer.write("import io.github.tbib.ktorgenerator.annotations.engine.KtorGeneratorClient\n")
             writer.write("import io.ktor.http.content.PartData\n")
 
-            writer.write("internal fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
-            writer.write("internal class $implName : $interfaceName {\n")
+            val visibility = if (Modifier.INTERNAL in apiInterface.modifiers) "internal" else ""
+
+            writer.write("$visibility fun KtorGeneratorClient.create${interfaceName}(): $interfaceName = $implName()\n\n")
+            writer.write("$visibility class $implName : $interfaceName {\n")
             functions.forEach { generateFunctionImpl(it, writer, resolver) }
             writer.write("}\n")
         }
@@ -72,72 +75,48 @@ class KtorGeneratorProcessor(
     private fun validateFunction(func: KSFunctionDeclaration) {
         val funcName = func.simpleName.asString()
         val httpAnnotation =
-            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName!!.asString() in httpAnnotations.keys }
+            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
         val httpMethod =
             httpAnnotations[httpAnnotation.annotationType.resolve().declaration.qualifiedName!!.asString()]!!
-        val path = httpAnnotation.arguments.first().value as String
 
-        // @Path validation
-        val pathParams =
-            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Path" } }
-        val urlPlaceholders = Regex("\\{(\\w+)\\}").findAll(path).map { it.groupValues[1] }.toSet()
-        val pathAnnotationValues = pathParams.map {
-            (it.annotations.first { an -> an.shortName.asString() == "Path" }.arguments.firstOrNull()?.value as? String
-                ?: "").ifEmpty { it.name!!.asString() }
-        }.toSet()
-
-        val missingInParams = urlPlaceholders - pathAnnotationValues
-        if (missingInParams.isNotEmpty()) {
-            throw IllegalStateException("Missing @Path for placeholders: $missingInParams in function '$funcName'.")
-        }
-        val missingInUrl = pathAnnotationValues - urlPlaceholders
-        if (missingInUrl.isNotEmpty()) {
-            throw IllegalStateException("Unused @Path parameters: $missingInUrl in function '$funcName'.")
-        }
-
-        // General body validation
         val bodyParams =
             func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Body" } }
+        val fieldParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
+        val fieldMapParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "FieldMap" } }
+        val isFormUrlEncoded = func.annotations.any { it.shortName.asString() == "FormUrlEncoded" }
 
-        if (bodyParams.size > 1) {
-            throw IllegalStateException("Multiple @Body parameters are not allowed in function '$funcName'.")
+        if (bodyParams.isNotEmpty() && (fieldParams.isNotEmpty() || fieldMapParams.isNotEmpty())) {
+            throw IllegalStateException("Cannot use @Body with @Field or @FieldMap in the same function: '$funcName'.")
         }
 
-
-        val hasBody = bodyParams.isNotEmpty()
-        if (hasBody && httpMethod.lowercase() !in listOf("post", "put", "patch")) {
-            throw IllegalStateException("@Body can only be used with POST, PUT, or PATCH methods in function '$funcName'.")
+        if (fieldParams.isNotEmpty() && fieldMapParams.isNotEmpty() && !isFormUrlEncoded) {
+            throw IllegalStateException("Cannot use @Field and @FieldMap together for a JSON body. Use a single @Body parameter with a custom class or Map. Function: '$funcName'.")
         }
 
-        // @Headers validation
-        func.annotations.find { it.shortName.asString() == "Headers" }?.let {
-            val headers = it.arguments.first().value as? List<String>
-            headers?.forEach { header ->
-                if (":" !in header) {
-                    throw IllegalStateException("Malformed @Headers value: \"$header\". Header must be in the format \"Name: Value\". In function '$funcName'.")
-                }
-            }
-        }
-
-        // Multipart validation
-        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
-        if (isMultipart) {
+        if (isFormUrlEncoded) {
             if (httpMethod.lowercase() !in listOf("post", "put", "patch")) {
-                throw IllegalStateException("@Multipart is only supported for POST, PUT, and PATCH requests in function '$funcName'.")
+                throw IllegalStateException("@FormUrlEncoded can only be used with POST, PUT, or PATCH methods in function '$funcName'.")
             }
+            if (bodyParams.isNotEmpty()) {
+                throw IllegalStateException("Cannot use @Body with @FormUrlEncoded in the same function: '$funcName'.")
+            }
+        } else {
+            if ((fieldParams.isNotEmpty() || fieldMapParams.isNotEmpty()) && httpMethod.lowercase() !in listOf(
+                    "post",
+                    "put",
+                    "patch"
+                )
+            ) {
+                throw IllegalStateException("Using @Field or @FieldMap for a JSON body is only supported for POST, PUT, or PATCH methods in function '$funcName'.")
+            }
+        }
 
-            val partParams =
-                func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Part" } }
-            if (partParams.isNotEmpty() && bodyParams.isNotEmpty()) {
-                throw IllegalStateException("Cannot use @Part and @Body in the same multipart function: '$funcName'.")
-            }
-            if (partParams.isEmpty() && bodyParams.isEmpty()) {
-                throw IllegalStateException("A @Multipart function must have at least one @Part parameter or a @Body parameter of type MultiPartFormDataContent: '$funcName'.")
-            }
-            bodyParams.firstOrNull()?.let {
-                if (it.type.resolve().declaration.qualifiedName?.asString() != "io.ktor.client.request.forms.MultiPartFormDataContent") {
-                    throw IllegalStateException("In a @Multipart function, a @Body parameter must be of type MultiPartFormDataContent: '$funcName'.")
-                }
+        fieldMapParams.forEach { param ->
+            val paramType = param.type.resolve()
+            if (paramType.declaration.qualifiedName?.asString() != "kotlin.collections.Map") {
+                throw IllegalStateException("@FieldMap parameter must be of type Map in function '$funcName'.")
             }
         }
     }
@@ -167,49 +146,61 @@ class KtorGeneratorProcessor(
         }
         writer.write("        val urlPath = KtorGeneratorClient.baseUrl + \"$pathTemplate\"\n")
 
-        val isMultipart = func.annotations.any { it.shortName.asString() == "Multipart" }
+        val isFormUrlEncoded = func.annotations.any { it.shortName.asString() == "FormUrlEncoded" }
         val returnsUnit =
             func.returnType!!.resolve().declaration.qualifiedName?.asString() == "kotlin.Unit"
 
-        if (isMultipart) {
-            val bodyParam =
-                func.parameters.firstOrNull { it.annotations.any { an -> an.shortName.asString() == "Body" } }
-            if (bodyParam != null) {
-                writer.write("        val response = client.request(urlPath) { method = HttpMethod.$httpMethod; setBody(${bodyParam.name!!.asString()}) }\n")
-            } else {
-                writer.write("        val multipartData = mutableListOf<PartData>()\n")
-                func.parameters.forEach { param ->
-                    param.annotations.find { it.shortName.asString() == "Part" }
-                        ?.let { partAnnotation ->
-                            val partName = (partAnnotation.arguments.firstOrNull()?.value as? String
-                                ?: "").ifEmpty { param.name!!.asString() }
-                            val paramType = param.type.resolve()
-                            val isList =
-                                paramType.declaration.qualifiedName?.asString() == "kotlin.collections.List"
-                            val isPartData =
-                                (paramType.declaration as? KSClassDeclaration)?.getAllSuperTypes()
-                                    ?.any { it.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData" } == true || paramType.declaration.qualifiedName?.asString() == "io.ktor.http.content.PartData"
-                            val isNullable = paramType.isMarkedNullable
-
-                            val partCreationCode = when {
-                                isList -> "        ${param.name!!.asString()}?.let { multipartData.addAll(it) }\n"
-                                isPartData -> "        ${param.name!!.asString()}?.let { multipartData.add(it) }\n"
-                                else -> "        ${param.name!!.asString()}?.let { multipartData.add(PartData.FormItem(it.toString(), { }, Headers.build { append(HttpHeaders.ContentDisposition, \"form-data; name=$partName\") })) }\n"
-                            }
-                            writer.write(partCreationCode)
-                        }
+        if (isFormUrlEncoded) {
+            writer.write("        val response = client.submitForm(\n")
+            writer.write("            url = urlPath,\n")
+            writer.write("            formParameters = Parameters.build {\n")
+            func.parameters.forEach { param ->
+                param.annotations.find { it.shortName.asString() == "Field" }
+                    ?.let { fieldAnnotation ->
+                        val fieldName = fieldAnnotation.arguments.first().value as String
+                        writer.write("                append(\"$fieldName\", ${param.name!!.asString()})\n")
+                    }
+                param.annotations.find { it.shortName.asString() == "FieldMap" }?.let {
+                    writer.write("                ${param.name!!.asString()}.forEach { (key, value) -> append(key, value.toString()) }\n")
                 }
-                writer.write("        val response = client.submitFormWithBinaryData(url = urlPath, formData = multipartData)\n")
             }
+            writer.write("            }\n")
+            writer.write("        )\n")
             if (!returnsUnit) writer.write("        return response.body()\n")
         } else {
             writer.write("        val response = client.request(urlPath) {\n")
             writer.write("            method = HttpMethod.$httpMethod\n")
 
-            func.annotations.find { it.shortName.asString() == "Headers" }?.let { headersAnn ->
-                (headersAnn.arguments.first().value as? List<String>)?.forEach { headerValue ->
-                    val (key, value) = headerValue.split(":", limit = 2).map { it.trim() }
-                    writer.write("            header(\"$key\", \"$value\")\n")
+            val fieldParams =
+                func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
+            val fieldMapParams =
+                func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "FieldMap" } }
+
+            if (fieldParams.isNotEmpty() || fieldMapParams.isNotEmpty()) {
+                writer.write("            contentType(ContentType.Application.Json)\n")
+                writer.write("            val bodyMap = mutableMapOf<String, Any?>()\n")
+                fieldParams.forEach { param ->
+                    val fieldName =
+                        param.annotations.first { it.shortName.asString() == "Field" }.arguments.first().value as String
+                    if (param.type.resolve().isMarkedNullable) {
+                        writer.write("            ${param.name!!.asString()}?.let { bodyMap[\"$fieldName\"] = it }\n")
+                    } else {
+                        writer.write("            bodyMap[\"$fieldName\"] = ${param.name!!.asString()}\n")
+                    }
+                }
+                fieldMapParams.forEach { param ->
+                    if (param.type.resolve().isMarkedNullable) {
+                        writer.write("           ${param.name!!.asString()}?.let { bodyMap.putAll(it) }\n")
+                    } else {
+                        writer.write("           bodyMap.putAll(${param.name!!.asString()})\n")
+                    }
+                }
+                writer.write("            setBody(bodyMap)\n")
+            } else {
+                func.parameters.find { it.annotations.any { an -> an.shortName.asString() == "Body" } }
+                    ?.let {
+                        writer.write("            contentType(ContentType.Application.Json)\n")
+                        writer.write("            setBody(${it.name!!.asString()})\n")
                 }
             }
 
@@ -233,14 +224,6 @@ class KtorGeneratorProcessor(
                         } else {
                         writer.write("            header(\"$headerName\", ${param.name!!.asString()})\n")
                     }
-                    }
-                param.annotations.find { it.shortName.asString() == "Body" }?.let {
-                    writer.write("            contentType(ContentType.Application.Json)\n")
-                    writer.write("            setBody(${param.name!!.asString()})\n")
-                }
-                param.annotations.find { it.shortName.asString() == "FieldMap" }?.let {
-                    writer.write("            contentType(ContentType.Application.Json)\n")
-                    writer.write("            setBody(${param.name!!.asString()})\n")
                 }
             }
             writer.write("        }\n")
