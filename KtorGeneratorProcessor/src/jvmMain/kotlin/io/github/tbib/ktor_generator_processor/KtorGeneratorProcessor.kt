@@ -1,22 +1,18 @@
 package io.github.tbib.ktor_generator_processor
 
-import com.google.devtools.ksp.containingFile
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.symbol.KSAnnotated
-import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSFunctionDeclaration
-import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
-import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
@@ -36,261 +32,212 @@ class KtorGeneratorProcessor(
         "io.github.tbib.ktorgenerator.annotations.annotations.HEAD" to "Head"
     )
 
-    override fun process(resolver: Resolver): List<KSAnnotated> {
-        val interfaces = resolver
-            .getSymbolsWithAnnotation("io.github.tbib.ktorgenerator.annotations.annotations.ApiService")
+    override fun process(resolver: Resolver): List<KSClassDeclaration> {
+        val interfaces =
+            resolver.getSymbolsWithAnnotation("io.github.tbib.ktorgenerator.annotations.annotations.ApiService")
             .filterIsInstance<KSClassDeclaration>()
-            .toList()
 
-        if (interfaces.isEmpty()) return emptyList()
-
-        val deps = safeDependencies(
-            symbols = interfaces.asSequence()
-        )
-
-        interfaces.forEach { api ->
-            generateImplForInterface(api, resolver, deps)
+        interfaces.forEach { apiInterface ->
+            generateImplForInterface(apiInterface, resolver)
         }
 
         return emptyList()
     }
 
-    private fun generateImplForInterface(
-        apiInterface: KSClassDeclaration,
-        resolver: Resolver,
-        deps: Dependencies
-    ) {
+    private fun generateImplForInterface(apiInterface: KSClassDeclaration, resolver: Resolver) {
+        val interfaceName = apiInterface.simpleName.asString()
         val pkg = apiInterface.packageName.asString()
-        val name = apiInterface.simpleName.asString()
-        val impl = "${name}Impl"
+        val implName = "${interfaceName}Impl"
 
-        // هل الواجهة internal ؟
-        val isInternal = Modifier.INTERNAL in apiInterface.modifiers
-
-        val functions = apiInterface.getAllFunctions().filter { f ->
-            f.annotations.any { ann ->
-                safeAnnotationQualifiedName(ann) in httpAnnotations.keys
-            }
-        }.toList()
+        val functions = apiInterface.getAllFunctions().filter { func ->
+            func.annotations.any { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
+        }
 
         functions.forEach { validateFunction(it) }
 
-        val fileBuilder = FileSpec.builder(pkg, impl)
+        val fileSpec = FileSpec.builder(pkg, implName)
             .addImport("io.ktor.client.request", "request")
             .addImport("io.ktor.client.request", "parameter")
-            .addImport("io.ktor.client.request.forms", "submitFormWithBinaryData")
-            .addImport("io.ktor.client.request", "header")
             .addImport("io.ktor.http", "HttpMethod")
-            .addImport("io.ktor.http", "Headers")
-            .addImport("io.ktor.http", "ContentType")
             .addImport("io.ktor.client.call", "body")
+            .addImport("io.ktor.client.request", "header")
+            .addImport("io.ktor.http", "contentType")
+            .addImport("io.ktor.http", "ContentType")
+            .addImport("io.ktor.client.request", "setBody")
             .addImport("io.ktor.client.statement", "bodyAsText")
-            .addImport("io.ktor.client.request.forms", "formData")
-
-        val classBuilder = TypeSpec.classBuilder(impl)
-            // حدد visibility بناء على واجهة الـ API
-            .addModifiers(if (isInternal) KModifier.INTERNAL else KModifier.PUBLIC)
-            .addSuperinterface(apiInterface.asType(emptyList()).toTypeName())
-
-        functions.forEach { fn ->
-            classBuilder.addFunction(generateFunctionImpl(fn, resolver))
-        }
-
-        fileBuilder.addType(classBuilder.build())
-
-        // دائمًا public fun createXXX()
-        val clientCls = ClassName(
-            "io.github.tbib.ktorgenerator.annotations.engine",
-            "KtorGeneratorClient"
-        )
-
-        val createFn = FunSpec.builder("create${name}")
-            .receiver(clientCls)
-            .addModifiers(if (isInternal) KModifier.INTERNAL else KModifier.PUBLIC)
-            .returns(apiInterface.asType(emptyList()).toTypeName())
-            .addStatement("return %L()", impl)
+            .addType(
+                TypeSpec.classBuilder(implName)
+                .addSuperinterface(apiInterface.asType(emptyList()).toTypeName())
+                .apply {
+                    if (Modifier.INTERNAL in apiInterface.modifiers) {
+                        addModifiers(KModifier.INTERNAL)
+                    }
+                    functions.forEach { addFunction(generateFunctionImpl(it, resolver)) }
+                }
+                .build())
+            .addFunction(
+                FunSpec.builder("create${interfaceName}")
+                .receiver(
+                    com.squareup.kotlinpoet.ClassName(
+                        "io.github.tbib.ktorgenerator.annotations.engine",
+                        "KtorGeneratorClient"
+                    )
+                )
+                .returns(apiInterface.asType(emptyList()).toTypeName())
+                .addStatement("return $implName()")
+                .apply {
+                    if (Modifier.INTERNAL in apiInterface.modifiers) {
+                        addModifiers(KModifier.INTERNAL)
+                    }
+                }
+                .build())
             .build()
 
-        fileBuilder.addFunction(createFn)
-
-        fileBuilder.build().writeTo(codeGenerator, deps)
-
+        fileSpec.writeTo(codeGenerator, Dependencies(true, apiInterface.containingFile!!))
     }
 
+    private fun validateFunction(func: KSFunctionDeclaration) {
+        val funcName = func.simpleName.asString()
+        val httpAnnotation =
+            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
+        val httpMethod =
+            httpAnnotations[httpAnnotation.annotationType.resolve().declaration.qualifiedName!!.asString()]!!
+        val bodyParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Body" } }
+        val fieldParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
+        val hasBody = bodyParams.isNotEmpty() || fieldParams.isNotEmpty()
 
-    private fun generateFunctionImpl(
-        func: KSFunctionDeclaration,
-        resolver: Resolver
-    ): FunSpec {
-        val httpAnn = func.annotations.first {
-            safeAnnotationQualifiedName(it) in httpAnnotations
+        if (httpMethod.lowercase() == "get" && hasBody) {
+            throw IllegalStateException("""@Body and @Field are not allowed on GET requests. Use @Query for GET request parameters. In function '$funcName'.""")
         }
-        val httpMethod = httpAnnotations[safeAnnotationQualifiedName(httpAnn)]!!
-        val path = httpAnn.arguments.first().value as String
+    }
 
-        val builder = FunSpec.builder(func.simpleName.asString())
+    private fun generateFunctionImpl(func: KSFunctionDeclaration, resolver: Resolver): FunSpec {
+        val httpAnnotation =
+            func.annotations.first { it.annotationType.resolve().declaration.qualifiedName?.asString() in httpAnnotations.keys }
+        val httpMethod =
+            httpAnnotations[httpAnnotation.annotationType.resolve().declaration.qualifiedName!!.asString()]!!
+        val path = httpAnnotation.arguments.first().value as String
+
+        return FunSpec.builder(func.simpleName.asString())
             .addModifiers(KModifier.OVERRIDE, KModifier.SUSPEND)
-
-        func.parameters.forEach { p ->
-            builder.addParameter(p.name!!.asString(), p.type.toTypeName())
-        }
-
-        func.returnType?.let { builder.returns(it.toTypeName()) }
-
-        builder.addStatement(
-            "val client = KtorGeneratorClient.ktorClient " +
-                    "?: throw IllegalStateException(%S)",
-            "HttpClient not initialized"
-        )
-
-        builder.addCode(createFunctionBody(func, httpMethod, path))
-
-        return builder.build()
+            .returns(func.returnType!!.toTypeName())
+            .apply {
+                func.parameters.forEach {
+                    addParameter(
+                        ParameterSpec.builder(
+                            it.name!!.asString(),
+                            it.type.toTypeName()
+                        ).build()
+                    )
+                }
+            }
+            .addStatement("val client = KtorGeneratorClient.ktorClient ?: throw IllegalStateException(\"\"\"HttpClient not initialized\"\"\")")
+            .addCode(createFunctionBody(func, httpMethod, path, resolver))
+            .build()
     }
 
     private fun createFunctionBody(
         func: KSFunctionDeclaration,
         httpMethod: String,
-        path: String
+        path: String,
+        resolver: Resolver
     ): CodeBlock {
-        val cb = CodeBlock.builder()
-
-        cb.addStatement("var urlPath = %S", path)
-
-        func.parameters.forEach { p ->
-            p.annotations.find { it.shortName.asString() == "Path" }?.let { ann ->
-                val name = p.name!!.asString()
-                val key = ann.arguments.first().value as? String ?: name
-                cb.addStatement("urlPath = urlPath.replace(%S, %L.toString())", "{$key}", name)
+        val builder = CodeBlock.builder()
+        builder.addStatement("var urlPath = %S", path)
+        func.parameters.forEach { param ->
+            param.annotations.find { it.shortName.asString() == "Path" }?.let {
+                val paramName = param.name!!.asString()
+                val pathParamName =
+                    (it.arguments.firstOrNull()?.value as? String ?: "").ifEmpty { paramName }
+                builder.addStatement(
+                    "urlPath = urlPath.replace(%S, %L.toString())",
+                    "{$pathParamName}",
+                    paramName
+                )
             }
         }
+        builder.addStatement("urlPath = KtorGeneratorClient.baseUrl + urlPath")
 
-        cb.addStatement(
-            "urlPath = KtorGeneratorClient.baseUrl + urlPath"
-        )
+        val returnsUnit =
+            func.returnType!!.resolve().declaration.qualifiedName?.asString() == "kotlin.Unit"
+        val isTextResponse = func.annotations.any { it.shortName.asString() == "TextResponse" }
+        val returnType = func.returnType!!.toTypeName()
 
-        val isMultipart = func.parameters.any { p ->
-            val qn = p.type.resolve().declaration.qualifiedName?.asString()
-            qn == "PartData" ||
-                    (qn == "kotlin.collections.List" &&
-                            p.type.resolve().arguments.first().type?.resolve()
-                                ?.declaration?.qualifiedName?.asString() == "PartData")
-        }
+        builder.beginControlFlow("val response = client.request(urlPath)")
+        builder.addStatement("method = HttpMethod.%L", httpMethod)
 
-        if (!isMultipart) {
-            cb.beginControlFlow("val response = client.request(urlPath) {")
-            cb.addStatement("method = HttpMethod.%L", httpMethod)
-        } else {
-            cb.addStatement("val response = client.submitFormWithBinaryData(")
-            cb.addStatement("    url = urlPath,")
-            cb.addStatement("    formData = formData {")
-        }
-
-        // Query
-        func.parameters.forEach { p ->
-            p.annotations.find { it.shortName.asString() == "Query" }?.let { ann ->
-                val name = p.name!!.asString()
-                val q = ann.arguments.first().value as? String ?: name
-                cb.addStatement("parameter(%S, %L)", q, name)
-            }
-        }
-
-        // Headers
-        func.annotations.find { it.shortName.asString() == "Headers" }
-            ?.arguments?.first()?.value.let { headers ->
-                if (headers is List<*>) {
-                    headers.forEach { h ->
-                        val v = h as String
-                        val parts = v.split(":", limit = 2)
-                        cb.addStatement("header(%S, %S)", parts[0].trim(), parts[1].trim())
-                    }
+        // Headers from @Headers annotation
+        func.annotations.find { it.shortName.asString() == "Headers" }?.let { headersAnn ->
+            (headersAnn.arguments.firstOrNull()?.value as? List<String>)?.forEach { headerValue ->
+                if (":" in headerValue) {
+                    val (key, value) = headerValue.split(":", limit = 2).map { it.trim() }
+                    builder.addStatement("header(%S, %S)", key, value)
                 }
             }
+        }
 
-        // Multipart
-        if (isMultipart) {
-            func.parameters.forEach { p ->
-                val code = buildMultipart(p.name!!.asString(), p)
-                cb.add(code)
+        // Parameters
+        func.parameters.forEach { param ->
+            val paramName = param.name!!.asString()
+            param.annotations.find { it.shortName.asString() == "Query" }?.let {
+                val queryParamName =
+                    (it.arguments.firstOrNull()?.value as? String ?: "").ifEmpty { paramName }
+                if (param.type.resolve().isMarkedNullable) {
+                    builder.addStatement("%L?.let { parameter(%S, it) }", paramName, queryParamName)
+                } else {
+                    builder.addStatement("parameter(%S, %L)", queryParamName, paramName)
+                }
             }
-
-            cb.addStatement("    }")
-            cb.addStatement(")")
-        } else {
-            cb.endControlFlow()
+            param.annotations.find { it.shortName.asString() == "Header" }?.let {
+                val headerName = it.arguments.first().value as String
+                if (param.type.resolve().isMarkedNullable) {
+                    builder.addStatement("%L?.let { header(%S, it) }", paramName, headerName)
+                } else {
+                    builder.addStatement("header(%S, %L)", headerName, paramName)
+                }
+            }
         }
 
-        val isUnit =
-            func.returnType?.resolve()?.declaration?.qualifiedName?.asString() == "kotlin.Unit"
-        if (!isUnit) cb.addStatement("return response.body()")
-
-        return cb.build()
-    }
-
-    private fun validateFunction(func: KSFunctionDeclaration) {
-        val httpAnn = func.annotations.firstOrNull {
-            safeAnnotationQualifiedName(it) in httpAnnotations
-        } ?: error("Missing HTTP annotation on ${func.simpleName.asString()}")
-
-        val method = httpAnnotations[safeAnnotationQualifiedName(httpAnn)]!!
-        val hasBody = func.parameters.any { p ->
-            p.annotations.any { it.shortName.asString() == "Body" || it.shortName.asString() == "Field" }
-        }
-
-        if (method == "Get" && hasBody) {
-            error("GET cannot contain a body (${func.simpleName.asString()})")
-        }
-    }
-}
-
-// ----------------------------- Helpers ------------------------------------
-
-private fun safeAnnotationQualifiedName(ann: KSAnnotation): String? =
-    try {
-        ann.annotationType.resolve().declaration.qualifiedName?.asString()
-    } catch (_: Throwable) {
-        null
-    }
-
-fun buildMultipart(name: String, variable: KSValueParameter): String {
-    val type = variable.type.resolve()
-    val qn = type.declaration.qualifiedName?.asString()
-
-    return when {
-        // Single file PartData
-        qn == "PartData" -> """
-            append($name)
-        """.trimIndent()
-
-        // List<PartData>
-        qn == "kotlin.collections.List" &&
-                type.arguments.first().type?.resolve()?.declaration?.qualifiedName?.asString() ==
-                "PartData" -> """
-            $name?.forEach { append(it) }
-        """.trimIndent()
-
-        // String → FormItem
-        qn == "kotlin.String" -> """
-            if ($name != null)
-                append(
-                    FormItem(
-                        value = $name,
-                        key = "$name"
+        // Body
+        val fieldParams =
+            func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
+        if (fieldParams.isNotEmpty()) {
+            builder.addStatement("contentType(ContentType.Application.Json)")
+            builder.addStatement("val bodyMap = mutableMapOf<String, Any?>()")
+            fieldParams.forEach { param ->
+                val fieldName =
+                    param.annotations.first { it.shortName.asString() == "Field" }.arguments.first().value as String
+                if (param.type.resolve().isMarkedNullable) {
+                    builder.addStatement(
+                        "%L?.let { bodyMap[%S] = it }",
+                        param.name!!.asString(),
+                        fieldName
                     )
-                )
-        """.trimIndent()
+                } else {
+                    builder.addStatement("bodyMap[%S] = %L", fieldName, param.name!!.asString())
+                }
+            }
+            builder.addStatement("setBody(bodyMap)")
+        } else {
+            func.parameters.find { it.annotations.any { an -> an.shortName.asString() == "Body" } }
+                ?.let {
+                    builder.addStatement("contentType(ContentType.Application.Json)")
+                    builder.addStatement("setBody(${it.name!!.asString()})")
+                }
+        }
 
-        else -> error("Unsupported Multipart Parameter: $name (type=$qn)")
-    }
-}
+        builder.endControlFlow()
 
-fun safeDependencies(
-    symbols: Sequence<KSAnnotated>
-): Dependencies {
-    val files = symbols.mapNotNull { it.containingFile }.toList()
-    return if (files.isNotEmpty()) {
-        Dependencies(true, *files.toTypedArray())
-    } else {
-        Dependencies(false)
+        if (!returnsUnit) {
+            if (isTextResponse) {
+                builder.addStatement("return response.bodyAsText()")
+            } else {
+                builder.addStatement("return response.body()")
+            }
+        }
+
+        return builder.build()
     }
 }
