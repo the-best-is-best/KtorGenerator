@@ -60,7 +60,7 @@ fun App() {
                     })
                 }
 
-                KtorApi.ktorApiServices.uploadPhoto(null, "null", multipart)
+                KtorApi.ktorApiServices.uploadPhoto(multipart)
 
 
                 println("Created PartData.FileItem: $multipart")
