@@ -2,7 +2,6 @@ package io.github.tbib.ktorgenerator.annotations.annotations
 
 import kotlin.annotation.AnnotationRetention.RUNTIME
 import kotlin.annotation.AnnotationTarget.FUNCTION
-import kotlin.annotation.AnnotationTarget.VALUE_PARAMETER
 
 @Target(FUNCTION)
 @Retention(RUNTIME)
@@ -31,27 +30,3 @@ annotation class HEAD(val path: String)
 @Target(FUNCTION)
 @Retention(RUNTIME)
 annotation class PATCH(val path: String)
-
-@Target(FUNCTION)
-@Retention(RUNTIME)
-annotation class Multipart
-
-@Target(VALUE_PARAMETER)
-@Retention(RUNTIME)
-annotation class Part(val value: String = "")
-
-@Target(FUNCTION)
-@Retention(RUNTIME)
-annotation class Headers(vararg val value: String)
-
-@Target(FUNCTION)
-@Retention(RUNTIME)
-annotation class FormUrlEncoded
-
-@Target(VALUE_PARAMETER)
-@Retention(RUNTIME)
-annotation class Field(val value: String)
-
-@Target(VALUE_PARAMETER)
-@Retention(RUNTIME)
-annotation class FieldMap

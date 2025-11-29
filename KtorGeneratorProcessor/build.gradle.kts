@@ -11,7 +11,10 @@ kotlin {
 //            api(projects.automapperAnnotations)
         }
         jvmMain.dependencies {
-            implementation(libs.ksp.api)
+            compileOnly(libs.ksp.api)
+            implementation(libs.kotlinpoet)
+            implementation(libs.kotlinpoet.ksp)
+            implementation(libs.kotlinpoet.metadata)
         }
     }
 }

@@ -8,6 +8,7 @@ import io.github.tbib.ktorgenerator.annotations.annotations.Multipart
 import io.github.tbib.ktorgenerator.annotations.annotations.POST
 import io.github.tbib.ktorgenerator.annotations.annotations.Part
 import io.github.tbib.ktorgenerator.annotations.annotations.Path
+import io.github.tbib.ktorgenerator.annotations.annotations.TextResponse
 import io.github.tbib.ktorgeneratorapp.responses.PostsResponse
 import io.ktor.http.content.PartData
 
@@ -28,4 +29,10 @@ internal interface KtorApiServices {
     @POST("your/endpoint")
     @Headers("Authorization: Bearer <token>", "Content-Type: application/json")
     suspend fun sendSomeData(@Field("test") someData: String)
+
+    @GET("endPoint/{test}")
+    @TextResponse
+    @Headers("Accept: text/html")
+    suspend fun getText(@Path("test") test: String): String
+
 }

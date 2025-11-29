@@ -21,6 +21,7 @@ ktor = "3.3.2"
 jetbrainsKotlinJvm = "2.2.21"
 ksp = "2.3.3"
 kotlinx-serialization = "1.9.0"
+kotlinpoet = "1.18.1"
 
 
 [libraries]
@@ -52,7 +53,9 @@ ktor-client-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 
-
+kotlinpoet = { module = "com.squareup:kotlinpoet", version.ref = "kotlinpoet" }
+kotlinpoet-ksp = { module = "com.squareup:kotlinpoet-ksp", version.ref = "kotlinpoet" }
+kotlinpoet-metadata = { module = "com.squareup:kotlinpoet-metadata", version.ref = "kotlinpoet" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
