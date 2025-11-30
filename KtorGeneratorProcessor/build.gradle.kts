@@ -15,6 +15,8 @@ kotlin {
             implementation(libs.kotlinpoet)
             implementation(libs.kotlinpoet.ksp)
             implementation(libs.kotlinpoet.metadata)
+
+            api(libs.ktor.client.core)
         }
     }
 }

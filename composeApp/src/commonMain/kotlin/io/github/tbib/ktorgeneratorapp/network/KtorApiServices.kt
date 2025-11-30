@@ -2,6 +2,8 @@ package io.github.tbib.ktorgeneratorapp.network
 
 import io.github.tbib.ktorgenerator.annotations.annotations.ApiService
 import io.github.tbib.ktorgenerator.annotations.annotations.Field
+import io.github.tbib.ktorgenerator.annotations.annotations.FieldMap
+import io.github.tbib.ktorgenerator.annotations.annotations.FormUrlEncoded
 import io.github.tbib.ktorgenerator.annotations.annotations.GET
 import io.github.tbib.ktorgenerator.annotations.annotations.Headers
 import io.github.tbib.ktorgenerator.annotations.annotations.Multipart
@@ -34,5 +36,13 @@ internal interface KtorApiServices {
     @TextResponse
     @Headers("Accept: text/html")
     suspend fun getText(@Path("test") test: String): String
+
+    @FormUrlEncoded
+    @POST("/login")
+    suspend fun login(
+        @Field("username") username: String,
+        @Field("password") password: String,
+        @FieldMap extra: Map<String, Any?>?
+    )
 
 }

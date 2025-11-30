@@ -18,6 +18,7 @@ import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
+import io.ktor.client.request.forms.MultiPartFormDataContent
 
 class KtorGeneratorProcessor(
     private val codeGenerator: CodeGenerator,
@@ -64,6 +65,7 @@ class KtorGeneratorProcessor(
 
         val fileSpec = FileSpec.builder(pkg, implName)
             .addAnnotation(internalApiAnnotation)
+            .addImport("io.ktor.client.request.forms", "FormDataContent")
             .addImport("io.ktor.utils.io", "InternalAPI")
             .addImport("io.ktor.client.request", "request")
             .addImport("io.ktor.http", "HttpMethod")
@@ -119,6 +121,8 @@ class KtorGeneratorProcessor(
             func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Body" } }
         val fieldParams =
             func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
+
+
         val hasBody = bodyParams.isNotEmpty() || fieldParams.isNotEmpty()
 
         if (httpMethod.lowercase() == "get" && hasBody) {
@@ -157,6 +161,10 @@ class KtorGeneratorProcessor(
         path: String,
         resolver: Resolver
     ): CodeBlock {
+        val isFormUrlEncoded = func.annotations.any { it.shortName.asString() == "FormUrlEncoded" }
+        val fieldMapParam =
+            func.parameters.find { it.annotations.any { an -> an.shortName.asString() == "FieldMap" } }
+
         val builder = CodeBlock.builder()
         builder.addStatement("var urlPath = %S", path)
         func.parameters.forEach { param ->
@@ -187,7 +195,7 @@ class KtorGeneratorProcessor(
         if (isMultipart) {
             // هل هناك براميتر MultiPartFormDataContent مباشر؟
             val multiPartParam = func.parameters.find {
-                it.type.resolve().declaration.qualifiedName?.asString() == "io.ktor.client.request.forms.MultiPartFormDataContent"
+                it.type.resolve().declaration.qualifiedName?.asString() == MultiPartFormDataContent::class.qualifiedName
             }
 
             if (multiPartParam != null) {
@@ -286,28 +294,41 @@ class KtorGeneratorProcessor(
 
             val fieldParams =
                 func.parameters.filter { it.annotations.any { an -> an.shortName.asString() == "Field" } }
-            if (fieldParams.isNotEmpty()) {
-                builder.addStatement("contentType(ContentType.Application.Json)")
-                builder.addStatement("val bodyMap = mutableMapOf<String, String>()")
+
+            if (isFormUrlEncoded || fieldParams.isNotEmpty() || fieldMapParam != null) {
+
+                builder.addStatement("contentType(ContentType.Application.FormUrlEncoded)")
+                builder.addStatement("val formParams = Parameters.build {")
+
+                // @Field
                 fieldParams.forEach { param ->
-                    val fieldName =
-                        param.annotations.first { it.shortName.asString() == "Field" }.arguments.first().value as String
+                    val fieldName = param.annotations.first { it.shortName.asString() == "Field" }
+                        .arguments.first().value as String
+
+                    val name = param.name!!.asString()
+
                     if (param.type.resolve().isMarkedNullable) {
                         builder.addStatement(
-                            "%L?.let { bodyMap[%S] = it.toString() }",
-                            param.name!!.asString(),
+                            "%L?.let { append(%S, it.toString()) }",
+                            name,
                             fieldName
                         )
                     } else {
-                        builder.addStatement(
-                            "bodyMap[%S] = %L.toString()",
-                            fieldName,
-                            param.name!!.asString()
-                        )
+                        builder.addStatement("append(%S, %L.toString())", fieldName, name)
                     }
                 }
-                builder.addStatement("setBody(bodyMap)")
+
+                // @FieldMap
+                fieldMapParam?.let { mapParam ->
+                    val name = mapParam.name!!.asString()
+                    builder.addStatement("%L?.forEach { (k, v) -> append(k, v.toString()) }", name)
+                }
+
+                builder.addStatement("}")
+                builder.addStatement("setBody(FormDataContent(formParams))")
+
             } else {
+
                 func.parameters.find { it.annotations.any { an -> an.shortName.asString() == "Body" } }
                     ?.let {
                     builder.addStatement("contentType(ContentType.Application.Json)")
