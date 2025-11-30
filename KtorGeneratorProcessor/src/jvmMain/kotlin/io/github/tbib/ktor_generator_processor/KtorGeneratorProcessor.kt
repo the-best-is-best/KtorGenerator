@@ -18,7 +18,6 @@ import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
-import io.ktor.client.request.forms.MultiPartFormDataContent
 
 class KtorGeneratorProcessor(
     private val codeGenerator: CodeGenerator,
@@ -193,67 +192,85 @@ class KtorGeneratorProcessor(
         }
 
         if (isMultipart) {
-            // هل هناك براميتر MultiPartFormDataContent مباشر؟
+            // Check if there's a MultiPartFormDataContent param directly
             val multiPartParam = func.parameters.find {
-                it.type.resolve().declaration.qualifiedName?.asString() == MultiPartFormDataContent::class.qualifiedName
+                it.type.resolve().declaration.qualifiedName?.asString() == "io.ktor.client.request.forms.MultiPartFormDataContent"
             }
 
             if (multiPartParam != null) {
                 val paramName = multiPartParam.name!!.asString()
-                // استدعاء client.request مع setBody (لأن param هو MultiPartFormDataContent)
                 builder.addStatement(
                     """
-                    val response = client.request(urlPath) {
-                        method = HttpMethod.Post
-                        setBody(%L)
-                    }
-                """.trimIndent(), paramName
+            val response = client.request(urlPath) {
+                method = HttpMethod.Post
+                setBody(%L)
+            }
+            """.trimIndent(), paramName
                 )
             } else {
-                // بناء formData التقليدي من List<PartData> أو غيره
-                builder.add("val multipartData = formData {\n")
+                // We have to build multipart manually merging formData and List<PartData>
+
+                // Start building formData part as a mutable list
+                builder.add("val formDataParts = mutableListOf<io.ktor.http.content.PartData>()\n")
 
                 func.parameters.forEach { param ->
                     val paramName = param.name!!.asString()
                     val paramType = param.type.resolve()
                     val isList =
                         paramType.declaration.qualifiedName?.asString() == "kotlin.collections.List"
-
                     val listGeneric = paramType.arguments.firstOrNull()?.type?.resolve()
                     val partDataType =
                         resolver.getClassDeclarationByName("io.ktor.http.content.PartData")!!
                             .asStarProjectedType()
-
                     val isListOfPartData =
                         isList && listGeneric != null && listGeneric.isAssignableFrom(partDataType)
                     val isSinglePartData = paramType.isAssignableFrom(partDataType)
 
                     when {
+                        // If parameter is List<PartData> (like files), add all elements directly to formDataParts list
                         isListOfPartData -> {
                             builder.addStatement(
-                                "%L?.forEach { append(%S, it) }",
-                                paramName,
+                                "%L?.let { formDataParts.addAll(it) }",
                                 paramName
                             )
                         }
 
+                        // If parameter is a single PartData, add it to formDataParts
                         isSinglePartData -> {
-                            builder.addStatement("%L?.let { append(%S, it) }", paramName, paramName)
+                            builder.addStatement(
+                                "%L?.let { formDataParts.add(it) }",
+                                paramName
+                            )
                         }
 
+                        // Else treat as normal key-value pair: append to formDataParts via formData builder
                         else -> {
+                            // Build key-value pairs using formData { append(key, value) } and then add to formDataParts
                             builder.addStatement(
-                                "%L?.let { append(%S, it.toString()) }",
-                                paramName,
-                                paramName
+                                """
+                        %L?.let { 
+                            val tmpParts = io.ktor.client.request.forms.formData {
+                                append(%S, it.toString())
+                            }
+                            formDataParts.addAll(tmpParts)
+                        }
+                        """.trimIndent(), paramName, paramName
                             )
                         }
                     }
                 }
-                builder.add("}\n")
-                builder.addStatement("val response = client.submitFormWithBinaryData(url = urlPath, formData = multipartData)")
+
+                builder.addStatement(
+                    """
+            val response = client.request(urlPath) {
+                method = HttpMethod.Post
+                setBody(io.ktor.client.request.forms.MultiPartFormDataContent(formDataParts))
+            }
+            """.trimIndent()
+                )
             }
         } else {
+
             // معالجة الطلبات الأخرى (GET، POST json ...) كما هي
             builder.beginControlFlow("val response = client.request(urlPath)")
             builder.addStatement("method = HttpMethod.%L", httpMethod)
