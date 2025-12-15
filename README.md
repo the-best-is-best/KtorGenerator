@@ -59,7 +59,7 @@ dependencies {
     implementation("io.github.tbib:ktorgenerator-annotations:x.y.z")
 
     // Add the KSP processor
-    ksp("io.github.tbib:ktor-generator-processor-processor:x.y.z")
+    ksp("io.github.tbib:ktor-generator-processor:x.y.z")
 }
 ```
 
