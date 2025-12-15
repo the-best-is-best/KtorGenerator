@@ -32,9 +32,10 @@ It includes:
   <!-- <a href="https://search.maven.org/artifact/io.github.tbib/ktorgenerator-annotations">
     <img src="https://img.shields.io/maven-central/v/io.github.tbib/ktorgenerator-annotations" />
   </a> -->
-  <a href="https://search.maven.org/artifact/io.github.tbib/ktor-generator-processor-processor">
-    <img src="https://img.shields.io/maven-central/v/io.github.tbib/ktor-generator-processor-processor" />
-  </a>
+    <a href="https://search.maven.org/artifact/io.github.the-best-is-best/ktor-generator-processor">
+      <img src="https://img.shields.io/maven-central/v/io.github.the-best-is-best/ktor-generator-processor" />
+    </a>
+
 </p>
 
 # 📦 Installation
