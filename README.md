@@ -56,10 +56,10 @@ plugins {
 
 dependencies {
     // Add the annotations library
-    implementation("io.github.tbib:ktorgenerator-annotations:x.y.z")
+    implementation("io.github.the-best-is-best:ktorgenerator-annotations:x.y.z")
 
     // Add the KSP processor
-    ksp("io.github.tbib:ktor-generator-processor:x.y.z")
+    ksp("io.github.the-best-is-best:ktor-generator-processor:x.y.z")
 }
 ```
 
