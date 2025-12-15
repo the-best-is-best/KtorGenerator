@@ -13,3 +13,7 @@ plugins {
     alias(libs.plugins.kotlinx.serialization) apply false
 
 }
+
+subprojects {
+    apply(from = "${rootProject.projectDir}/gradle/publish-config.gradle.kts")
+}

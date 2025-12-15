@@ -1,0 +1,11 @@
+extra["groupId"] = "io.github.the-best-is-best"
+extra["version"] = "1.0.0"
+extra["packageUrl"] = "https://github.com/the-best-is-best/KtorGenerator"
+extra["issueUrl"] = "https://github.com/the-best-is-best/KtorGenerator/issues"
+extra["connectionGit"] = "https://github.com/the-best-is-best/KtorGenerator.git"
+extra["system"] = "GITHUB"
+extra["developerName"] = "Michelle Raouf"
+extra["developerNameId"] = "MichelleRaouf"
+extra["developerEmail"] = "eng.michelle.raouf@gmail.com"
+extra["packageDescription"] =
+    "This package provides annotation definitions for koin generator KSP Processor, allowing automatic call apis generation between Kotlin classes for Kotlin Multiplatform, Android, and iOS."

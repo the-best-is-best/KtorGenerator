@@ -1,9 +1,9 @@
 [versions]
-agp = "8.13.1"
+agp = "8.13.2"
 android-compileSdk = "36"
 android-minSdk = "24"
 android-targetSdk = "36"
-androidx-activity = "1.12.0"
+androidx-activity = "1.12.1"
 androidx-appcompat = "1.7.1"
 androidx-core = "1.17.0"
 androidx-espresso = "3.7.0"
@@ -17,11 +17,12 @@ kotlinStdlib = "2.2.21"
 kotlinxDatetime = "0.7.1"
 runner = "1.7.0"
 core = "1.7.0"
-ktor = "3.3.2"
+ktor = "3.3.3"
 jetbrainsKotlinJvm = "2.2.21"
 ksp = "2.3.3"
 kotlinx-serialization = "1.9.0"
-kotlinpoet = "1.18.1"
+kotlinpoet = "2.2.0"
+mavenPublish = "0.35.0"
 
 
 [libraries]
@@ -68,3 +69,4 @@ androidLint = { id = "com.android.lint", version.ref = "agp" }
 jetbrainsKotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "jetbrainsKotlinJvm" }
 comGoogleDevToolsKsp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlinx-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
